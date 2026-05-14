@@ -227,7 +227,6 @@ class ClangRenderer(CStyleLanguage):
 
   # language options
   buffer_suffix = " restrict"
-  # bf16 as ushort: __bf16 selects round-trip through f32 in clang, which needs compiler-rt __truncsfbf2 we can't link
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.bfloat16:"unsigned short"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.TRUNC, Ops.RECIPROCAL]}),
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
