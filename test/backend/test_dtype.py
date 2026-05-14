@@ -223,23 +223,13 @@ class TestBFloat16DType(unittest.TestCase):
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
-  # regression: gather over a bf16 axis >= 32768 emitted a ternary on `__bf16` values, which clang lowers through f32
-  # and turns into a `__truncsfbf2` libcall on CPUs without native bf16 — unresolvable by the ELF loader
-  def test_bf16_gather_without_native_bf16(self):
-    from tinygrad.renderer.cstyle import ClangJITRenderer
-    if Device.DEFAULT != "CPU" or not isinstance(Device["CPU"].renderer, ClangJITRenderer):
-      self.skipTest("test forces non-native bf16 clang codegen, only meaningful for CPU ClangJITRenderer")
-    if Device["CPU"].renderer.compiler.arch != "x86_64": self.skipTest("haswell flag is x86_64-specific")
-    compiler = Device["CPU"].renderer.compiler
-    saved_args = compiler.args
-    compiler.args = ["-march=haswell"]  # x86_64 baseline target with no native bf16
-    try:
-      with Context(CACHELEVEL=0):
-        table = Tensor(np.zeros((32768, 16), dtype=np.float32)).cast(dtypes.bfloat16).realize()
-        ids = Tensor(np.array([[0]], dtype=np.int64))
-        np.testing.assert_allclose(table[ids].numpy(), np.zeros((1, 1, 16)))
-    finally:
-      compiler.args = saved_args
+  @unittest.skipUnless(Device.DEFAULT == "CPU" and type(Device["CPU"].renderer).__name__ == "ClangJITRenderer"
+                       and getattr(Device["CPU"].renderer.compiler, "arch", None) == "x86_64", "x86_64 ClangJIT only")
+  def test_bf16_no_native_bf16(self):
+    from unittest.mock import patch
+    with patch.object(Device["CPU"].renderer.compiler, "args", ["-march=haswell"]), Context(CACHELEVEL=0):
+      table = Tensor.zeros(32768, 16).cast(dtypes.bfloat16).realize()
+      np.testing.assert_equal(table[Tensor([[0]])].numpy(), 0)
 
 class TestBFloat16DTypeCast(unittest.TestCase):
   def test_f16_to_bf16_conversion(self):
