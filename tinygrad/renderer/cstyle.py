@@ -93,7 +93,8 @@ pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
-  (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
+  (UPat(Ops.CONST, dtype=dtypes.bfloat16, name='x'),
+   lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg)) if x.dtype.count == 1 else None),
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
@@ -506,6 +507,8 @@ class HIPRenderer(CStyleLanguage):
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
       lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
         x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
+    # bfloat16 constant casting
+    (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
   ])
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
