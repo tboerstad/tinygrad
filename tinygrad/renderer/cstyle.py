@@ -93,6 +93,10 @@ pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
+  # bf16 const: emit the bit pattern via bitcast from ushort to avoid compiler-rt's __truncsfbf2 on CPUs without native bf16
+  (UPat(Ops.CONST, dtype=dtypes.bfloat16, name="x"), lambda x:
+   UOp.const(dtypes.ushort.vec(x.dtype.count) if x.dtype.count > 1 else dtypes.ushort,
+             (struct.unpack('I', struct.pack('f', float_to_bf16(x.arg)))[0]>>16)&0xFFFF).bitcast(x.dtype)),
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
@@ -226,7 +230,10 @@ class ClangRenderer(CStyleLanguage):
 
   # language options
   buffer_suffix = " restrict"
-  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
+  # bf16 maps to "unsigned short" because clang implicitly promotes __bf16 selects/loads/stores through f32, which generates
+  # external calls to compiler-rt's __truncsfbf2 / __extendbfsf2 on CPUs without native bf16. pm_manual_bf16_cast keeps all
+  # bf16 arithmetic going through explicit float promotion at the UOp level, so the underlying storage type can be ushort.
+  type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16", dtypes.bfloat16:"unsigned short"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.TRUNC, Ops.RECIPROCAL]}),
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
